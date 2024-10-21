@@ -22,6 +22,7 @@ model User {
   Holiday              Holiday[]
   notificationSettings NotificationSettings?
   phone                String?
+  tenantId             String
 }
 
 model NotificationSettings {
@@ -38,6 +39,8 @@ model Master {
   id     Int  @id @default(autoincrement())
   user   User @relation(fields: [userId], references: [id])
   userId Int  @unique
+  tenantId    String
+  
 }
 
 model Clinic {
@@ -48,6 +51,7 @@ model Clinic {
   cnpj          String?
   address       String
   phone         String
+  tenantId      String
   psychologists Psychologist[]
   patients      Patient[]
 }
@@ -62,6 +66,7 @@ model Psychologist {
   phone         String
   clinic        Clinic?         @relation(fields: [clinicId], references: [id])
   clinicId      Int?
+  tenantId      String
   patients      Patient[]
   appointments  Appointment[]
   AvailableSlot AvailableSlot[]
@@ -78,6 +83,7 @@ model Patient {
   psychologistId Int?
   clinic         Clinic?       @relation(fields: [clinicId], references: [id])
   clinicId       Int?
+  tenantId       String
   appointments   Appointment[]
   moodDiaries    MoodDiary[]
 }
@@ -92,6 +98,7 @@ model Appointment {
   duration       Int
   status         AppointmentStatus
   notes          String?
+  tenantId       String
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
 }
