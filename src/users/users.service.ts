@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { User, Prisma, Role, NotificationSettings } from '@prisma/client';
+import { User, Prisma, Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
@@ -24,6 +24,17 @@ export class UsersService {
         name: data.name,
         password: hashedPassword,
         role: Role.MASTER,
+        notificationSettings: {
+          create: {
+            emailNotifications: true,
+            smsNotifications: false,
+            pushNotifications: false,
+            reminderTimeMinutes: 1440,
+          },
+        },
+      },
+      include: {
+        notificationSettings: true,
       },
     });
   }
@@ -36,6 +47,9 @@ export class UsersService {
   async findMasterByEmail(email: string): Promise<User | null> {
     return this.prisma.user.findUnique({
       where: { email, role: Role.MASTER },
+      include: {
+        notificationSettings: true,
+      },
     });
   }
 
@@ -47,6 +61,9 @@ export class UsersService {
   async findMasterById(id: number): Promise<User | null> {
     return this.prisma.user.findUnique({
       where: { id, role: Role.MASTER },
+      include: {
+        notificationSettings: true,
+      },
     });
   }
 
@@ -57,6 +74,9 @@ export class UsersService {
   async findAllMasters(): Promise<User[]> {
     return this.prisma.user.findMany({
       where: { role: Role.MASTER },
+      include: {
+        notificationSettings: true,
+      },
     });
   }
 
@@ -70,6 +90,9 @@ export class UsersService {
     return this.prisma.user.update({
       where: { id, role: Role.MASTER },
       data,
+      include: {
+        notificationSettings: true,
+      },
     });
   }
 
@@ -81,6 +104,9 @@ export class UsersService {
   async deleteMaster(id: number): Promise<User> {
     return this.prisma.user.delete({
       where: { id, role: Role.MASTER },
+      include: {
+        notificationSettings: true,
+      },
     });
   }
 
@@ -89,10 +115,14 @@ export class UsersService {
    * @param userId ID do usuário
    * @returns As configurações de notificação do usuário ou null se não existirem
    */
-  async getNotificationSettings(userId: number): Promise<NotificationSettings | null> {
-    return this.prisma.notificationSettings.findUnique({
-      where: { userId },
+  async getNotificationSettings(userId: number) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        notificationSettings: true,
+      },
     });
+    return user?.notificationSettings || null;
   }
 
   /**
@@ -103,12 +133,29 @@ export class UsersService {
    */
   async updateNotificationSettings(
     userId: number,
-    data: Prisma.NotificationSettingsUpdateInput,
-  ): Promise<NotificationSettings> {
-    return this.prisma.notificationSettings.upsert({
+    data: {
+      emailNotifications?: boolean;
+      smsNotifications?: boolean;
+      pushNotifications?: boolean;
+      reminderTimeMinutes?: number;
+    },
+  ) {
+    const existingSettings = await this.prisma.notificationSettings.findUnique({
       where: { userId },
-      update: data,
-      create: { ...data, userId },
     });
+
+    if (existingSettings) {
+      return this.prisma.notificationSettings.update({
+        where: { userId },
+        data,
+      });
+    } else {
+      return this.prisma.notificationSettings.create({
+        data: {
+          ...data,
+          userId,
+        },
+      });
+    }
   }
 }

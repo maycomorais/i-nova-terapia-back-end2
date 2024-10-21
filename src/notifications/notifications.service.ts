@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Appointment, User } from '@prisma/client';
+import { Appointment, User, NotificationSettings } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import * as nodemailer from 'nodemailer';
 
@@ -10,8 +10,6 @@ export class NotificationsService {
 
   constructor(private prisma: PrismaService) {
     this.transporter = nodemailer.createTransport({
-      // Configure seu serviço de e-mail aqui
-      // Por exemplo, para o Gmail:
       service: 'gmail',
       auth: {
         user: process.env.EMAIL_USER,
@@ -28,23 +26,38 @@ export class NotificationsService {
     try {
       const patient = await this.prisma.patient.findUnique({
         where: { id: appointment.patientId },
-        include: { user: { include: { notificationSettings: true } } },
-      });
-      const psychologist = await this.prisma.psychologist.findUnique({
-        where: { id: appointment.psychologistId },
-        include: { user: { include: { notificationSettings: true } } },
+        include: {
+          user: {
+            include: {
+              notificationSettings: true,
+            },
+          },
+        },
       });
 
-      await this.sendNotificationToUser(
-        patient.user,
-        'Nova consulta agendada',
-        this.formatAppointmentMessage(appointment, 'patient'),
-      );
-      await this.sendNotificationToUser(
-        psychologist.user,
-        'Nova consulta agendada',
-        this.formatAppointmentMessage(appointment, 'psychologist'),
-      );
+      const psychologist = await this.prisma.psychologist.findUnique({
+        where: { id: appointment.psychologistId },
+        include: {
+          user: {
+            include: {
+              notificationSettings: true,
+            },
+          },
+        },
+      });
+
+      if (patient?.user && psychologist?.user) {
+        await this.sendNotificationToUser(
+          patient.user,
+          'Nova consulta agendada',
+          this.formatAppointmentMessage(appointment, 'patient'),
+        );
+        await this.sendNotificationToUser(
+          psychologist.user,
+          'Nova consulta agendada',
+          this.formatAppointmentMessage(appointment, 'psychologist'),
+        );
+      }
     } catch (error) {
       this.logger.error(
         `Erro ao enviar notificação de agendamento: ${error.message}`,
@@ -60,23 +73,38 @@ export class NotificationsService {
     try {
       const patient = await this.prisma.patient.findUnique({
         where: { id: appointment.patientId },
-        include: { user: { include: { notificationSettings: true } } },
-      });
-      const psychologist = await this.prisma.psychologist.findUnique({
-        where: { id: appointment.psychologistId },
-        include: { user: { include: { notificationSettings: true } } },
+        include: {
+          user: {
+            include: {
+              notificationSettings: true,
+            },
+          },
+        },
       });
 
-      await this.sendNotificationToUser(
-        patient.user,
-        'Lembrete de consulta',
-        this.formatAppointmentMessage(appointment, 'patient'),
-      );
-      await this.sendNotificationToUser(
-        psychologist.user,
-        'Lembrete de consulta',
-        this.formatAppointmentMessage(appointment, 'psychologist'),
-      );
+      const psychologist = await this.prisma.psychologist.findUnique({
+        where: { id: appointment.psychologistId },
+        include: {
+          user: {
+            include: {
+              notificationSettings: true,
+            },
+          },
+        },
+      });
+
+      if (patient?.user && psychologist?.user) {
+        await this.sendNotificationToUser(
+          patient.user,
+          'Lembrete de consulta',
+          this.formatAppointmentMessage(appointment, 'patient'),
+        );
+        await this.sendNotificationToUser(
+          psychologist.user,
+          'Lembrete de consulta',
+          this.formatAppointmentMessage(appointment, 'psychologist'),
+        );
+      }
     } catch (error) {
       this.logger.error(
         `Erro ao enviar lembrete de agendamento: ${error.message}`,
@@ -91,31 +119,25 @@ export class NotificationsService {
    * @param message O corpo da mensagem
    */
   private async sendNotificationToUser(
-    user: User & { notificationSettings: any },
+    user: User & { notificationSettings?: NotificationSettings },
     subject: string,
     message: string,
   ): Promise<void> {
-    const settings = user.notificationSettings;
+    if (user.notificationSettings) {
+      if (user.notificationSettings.emailNotifications) {
+        await this.sendEmail(user.email, subject, message);
+      }
 
-    if (settings.emailNotifications) {
-      await this.sendEmail(user.email, subject, message);
-    }
+      if (user.notificationSettings.smsNotifications && user.phone) {
+        await this.sendSMS(user.phone, message);
+      }
 
-    if (settings.smsNotifications) {
-      await this.sendSMS(user.phone, message);
-    }
-
-    if (settings.pushNotifications) {
-      await this.sendPushNotification(user.id, subject, message);
+      if (user.notificationSettings.pushNotifications) {
+        await this.sendPushNotification(user.id, subject, message);
+      }
     }
   }
 
-  /**
-   * Envia um e-mail
-   * @param to Endereço de e-mail do destinatário
-   * @param subject Assunto do e-mail
-   * @param text Corpo do e-mail
-   */
   private async sendEmail(
     to: string,
     subject: string,

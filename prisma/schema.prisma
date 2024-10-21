@@ -21,6 +21,7 @@ model User {
   patient              Patient?
   Holiday              Holiday[]
   notificationSettings NotificationSettings?
+  phone                String?
 }
 
 model NotificationSettings {
