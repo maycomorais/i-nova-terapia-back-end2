@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { UsersModule } from './users/users.module';
@@ -11,10 +11,20 @@ import { PsychologistsModule } from './psychologists/psychologists.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { TasksModule } from './tasks/tasks.module';
+import { AsaasModule } from './asaas/asaas.module';
+import { TenantResourceGuard } from './common/guards/tenant-resource.guard';
+import { PermissionGuard } from './common/guards/permission.guard';
+import { HealthModule } from './health/health.module';
+import { ConfigModule } from '@nestjs/config';
+import { TenantMiddleware } from './middlewares/tenant.middleware';
+import { MoodDiariesModule } from './mood-diaries/mood-diaries.module';
 
 @Module({
   imports: [
     ScheduleModule.forRoot(),
+    ConfigModule.forRoot({
+      isGlobal: true,
+    }),
     UsersModule,
     PrismaModule,
     AuthModule,
@@ -24,8 +34,16 @@ import { TasksModule } from './tasks/tasks.module';
     AppointmentsModule,
     NotificationsModule,
     TasksModule,
+    AsaasModule,
+    HealthModule,
+    MoodDiariesModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [AppService, TenantResourceGuard, PermissionGuard],
+  exports: [TenantResourceGuard, PermissionGuard],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(TenantMiddleware).forRoutes('*');
+  }
+}

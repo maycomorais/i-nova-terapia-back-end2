@@ -1,141 +1,566 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+// src/psychologists/psychologists.service.ts
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  Logger,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Psychologist, Prisma } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
 
+/**
+ * Serviço responsável por gerenciar as operações relacionadas aos psicólogos
+ * Lida com criação, atualização, busca e remoção de psicólogos, além de suas relações
+ */
 @Injectable()
 export class PsychologistsService {
+  private readonly logger = new Logger(PsychologistsService.name);
+
   constructor(private prisma: PrismaService) {}
 
   /**
-   * Busca um psicólogo específico com base em um critério único
-   * @param psychologistWhereUniqueInput Critério de busca único (ex: id, email)
-   * @returns O psicólogo encontrado ou null se não existir
+   * Busca um psicólogo específico por ID
    */
   async psychologist(
-    psychologistWhereUniqueInput: Prisma.PsychologistWhereUniqueInput,
+    psychologistId: number,
+    tenantId: string,
   ): Promise<Psychologist | null> {
-    return this.prisma.psychologist.findUnique({
-      where: psychologistWhereUniqueInput,
+    const psychologist = await this.prisma.psychologist.findFirst({
+      where: {
+        id: psychologistId,
+        tenantId,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            role: true,
+            createdAt: true,
+            updatedAt: true,
+            phone: true,
+            tenantId: true,
+          },
+        },
+        clinic: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                email: true,
+                name: true,
+                role: true,
+                createdAt: true,
+                updatedAt: true,
+                phone: true,
+                tenantId: true,
+              },
+            },
+          },
+        },
+        patients: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                email: true,
+                name: true,
+                role: true,
+                createdAt: true,
+                updatedAt: true,
+                phone: true,
+                tenantId: true,
+              },
+            },
+          },
+        },
+      },
     });
+
+    if (!psychologist) {
+      throw new NotFoundException(
+        `Psicólogo com ID ${psychologistId} não encontrado`,
+      );
+    }
+
+    return psychologist;
   }
 
   /**
-   * Busca múltiplos psicólogos com base em vários critérios
-   * @param params Objeto contendo opções de busca, paginação e ordenação
-   * @returns Array de psicólogos que correspondem aos critérios
+   * Lista psicólogos com filtros e paginação
    */
   async psychologists(params: {
     skip?: number;
     take?: number;
-    cursor?: Prisma.PsychologistWhereUniqueInput;
     where?: Prisma.PsychologistWhereInput;
     orderBy?: Prisma.PsychologistOrderByWithRelationInput;
+    tenantId: string;
   }): Promise<Psychologist[]> {
-    const { skip, take, cursor, where, orderBy } = params;
+    const { skip, take, where, orderBy, tenantId } = params;
     return this.prisma.psychologist.findMany({
       skip,
       take,
-      cursor,
-      where,
-      orderBy,
+      where: {
+        ...where,
+        tenantId,
+      },
+      orderBy: {
+        user: {
+          name: 'asc',
+        },
+        ...orderBy,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            role: true,
+            createdAt: true,
+            updatedAt: true,
+            phone: true,
+            tenantId: true,
+          },
+        },
+        clinic: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                email: true,
+                name: true,
+                role: true,
+                createdAt: true,
+                updatedAt: true,
+                phone: true,
+                tenantId: true,
+              },
+            },
+          },
+        },
+        patients: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                email: true,
+                name: true,
+                role: true,
+                createdAt: true,
+                updatedAt: true,
+                phone: true,
+                tenantId: true,
+              },
+            },
+          },
+        },
+      },
     });
   }
 
   /**
    * Cria um novo psicólogo
-   * @param data Dados do psicólogo a ser criado
-   * @returns O psicólogo criado
    */
   async createPsychologist(
     data: Prisma.PsychologistCreateInput,
   ): Promise<Psychologist> {
-    return this.prisma.psychologist.create({
-      data,
+    this.logger.debug(`Criando psicólogo com CRP: ${data.crp}`);
+
+    // Verificar se CRP já existe
+    const existingCRP = await this.prisma.psychologist.findFirst({
+      where: {
+        crp: data.crp,
+        tenantId: data.tenantId,
+      },
     });
+
+    if (existingCRP) {
+      throw new ForbiddenException('CRP já cadastrado no sistema');
+    }
+
+    try {
+      // Se houver dados de usuário, fazer hash da senha
+      if (data.user?.create?.password) {
+        data.user.create.password = await bcrypt.hash(
+          data.user.create.password,
+          10,
+        );
+      }
+
+      // Criar o psicólogo com todas as relações
+      return await this.prisma.psychologist.create({
+        data: {
+          cpf: data.cpf,
+          crp: data.crp,
+          address: data.address,
+          phone: data.phone,
+          tenantId: data.tenantId,
+          user: data.user,
+          clinic: data.clinic,
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+              name: true,
+              role: true,
+              createdAt: true,
+              updatedAt: true,
+              phone: true,
+              tenantId: true,
+            },
+          },
+          clinic: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  email: true,
+                  name: true,
+                  role: true,
+                  createdAt: true,
+                  updatedAt: true,
+                  phone: true,
+                  tenantId: true,
+                },
+              },
+            },
+          },
+          patients: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  email: true,
+                  name: true,
+                  role: true,
+                  createdAt: true,
+                  updatedAt: true,
+                  phone: true,
+                  tenantId: true,
+                },
+              },
+            },
+          },
+        },
+      });
+    } catch (error) {
+      this.logger.error(
+        `Erro ao criar psicólogo: ${error.message}`,
+        error.stack,
+      );
+      if (error.code === 'P2002') {
+        throw new ForbiddenException(
+          'CRP, CPF ou email já cadastrado no sistema',
+        );
+      }
+      throw error;
+    }
   }
 
   /**
-   * Atualiza os dados de um psicólogo existente
-   * @param params Objeto contendo o critério de busca e os dados a serem atualizados
-   * @returns O psicólogo atualizado
+   * Atualiza um psicólogo
    */
   async updatePsychologist(params: {
-    where: Prisma.PsychologistWhereUniqueInput;
+    id: number;
     data: Prisma.PsychologistUpdateInput;
+    tenantId: string;
+    userId?: number;
   }): Promise<Psychologist> {
-    const { where, data } = params;
+    const { id, data, tenantId, userId } = params;
+
+    const psychologist = await this.psychologist(id, tenantId);
+
+    // Se for o próprio psicólogo atualizando, verificar permissões especiais
+    if (userId && psychologist.userId === userId) {
+      // Remover campos que o psicólogo não pode atualizar
+      delete (data as any).clinic;
+      delete (data as any).tenantId;
+    }
+
+    // Verificar CRP se estiver sendo atualizado
+    if (data.crp) {
+      const existingCRP = await this.prisma.psychologist.findFirst({
+        where: {
+          crp: data.crp as string,
+          tenantId,
+          NOT: { id },
+        },
+      });
+
+      if (existingCRP) {
+        throw new ForbiddenException('CRP já cadastrado no sistema');
+      }
+    }
+
     return this.prisma.psychologist.update({
+      where: { id },
       data,
-      where,
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            role: true,
+            createdAt: true,
+            updatedAt: true,
+            phone: true,
+            tenantId: true,
+          },
+        },
+        clinic: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                email: true,
+                name: true,
+                role: true,
+                createdAt: true,
+                updatedAt: true,
+                phone: true,
+                tenantId: true,
+              },
+            },
+          },
+        },
+        patients: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                email: true,
+                name: true,
+                role: true,
+                createdAt: true,
+                updatedAt: true,
+                phone: true,
+                tenantId: true,
+              },
+            },
+          },
+        },
+      },
     });
   }
 
   /**
-   * Remove um psicólogo do banco de dados
-   * @param where Critério único para identificar o psicólogo a ser removido
-   * @returns O psicólogo removido
+   * Remove um psicólogo
    */
   async deletePsychologist(
-    where: Prisma.PsychologistWhereUniqueInput,
+    id: number,
+    tenantId: string,
   ): Promise<Psychologist> {
+    await this.psychologist(id, tenantId);
+
+    const hasPatients = await this.prisma.patient.count({
+      where: {
+        psychologistId: id,
+        tenantId,
+      },
+    });
+
+    if (hasPatients > 0) {
+      throw new ForbiddenException(
+        'Não é possível excluir um psicólogo que possui pacientes vinculados',
+      );
+    }
+
     return this.prisma.psychologist.delete({
-      where,
+      where: { id },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            role: true,
+            createdAt: true,
+            updatedAt: true,
+            phone: true,
+            tenantId: true,
+          },
+        },
+        clinic: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                email: true,
+                name: true,
+                role: true,
+                createdAt: true,
+                updatedAt: true,
+                phone: true,
+                tenantId: true,
+              },
+            },
+          },
+        },
+        patients: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                email: true,
+                name: true,
+                role: true,
+                createdAt: true,
+                updatedAt: true,
+                phone: true,
+                tenantId: true,
+              },
+            },
+          },
+        },
+      },
     });
   }
 
   /**
-   * Vincula um psicólogo a uma clínica
-   * @param psychologistId ID do psicólogo
-   * @param clinicId ID da clínica
-   * @returns O psicólogo atualizado
+   * Vincula psicólogo a uma clínica
    */
   async linkToClinic(
     psychologistId: number,
     clinicId: number,
+    tenantId: string,
   ): Promise<Psychologist> {
-    const psychologist = await this.prisma.psychologist.findUnique({
-      where: { id: psychologistId },
-    });
+    await this.psychologist(psychologistId, tenantId);
 
-    if (!psychologist) {
-      throw new NotFoundException(
-        `Psychologist with ID ${psychologistId} not found`,
-      );
-    }
-
-    const clinic = await this.prisma.clinic.findUnique({
-      where: { id: clinicId },
+    const clinic = await this.prisma.clinic.findFirst({
+      where: {
+        id: clinicId,
+        tenantId,
+      },
     });
 
     if (!clinic) {
-      throw new NotFoundException(`Clinic with ID ${clinicId} not found`);
+      throw new NotFoundException(`Clínica com ID ${clinicId} não encontrada`);
     }
 
     return this.prisma.psychologist.update({
       where: { id: psychologistId },
-      data: { clinicId: clinicId },
+      data: {
+        clinic: {
+          connect: { id: clinicId },
+        },
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            role: true,
+            createdAt: true,
+            updatedAt: true,
+            phone: true,
+            tenantId: true,
+          },
+        },
+        clinic: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                email: true,
+                name: true,
+                role: true,
+                createdAt: true,
+                updatedAt: true,
+                phone: true,
+                tenantId: true,
+              },
+            },
+          },
+        },
+        patients: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                email: true,
+                name: true,
+                role: true,
+                createdAt: true,
+                updatedAt: true,
+                phone: true,
+                tenantId: true,
+              },
+            },
+          },
+        },
+      },
     });
   }
 
   /**
-   * Remove a vinculação de um psicólogo com uma clínica
-   * @param psychologistId ID do psicólogo
-   * @returns O psicólogo atualizado
+   * Remove vínculo com clínica
    */
-  async unlinkFromClinic(psychologistId: number): Promise<Psychologist> {
-    const psychologist = await this.prisma.psychologist.findUnique({
-      where: { id: psychologistId },
-    });
-
-    if (!psychologist) {
-      throw new NotFoundException(
-        `Psychologist with ID ${psychologistId} not found`,
-      );
-    }
+  async unlinkFromClinic(
+    psychologistId: number,
+    tenantId: string,
+  ): Promise<Psychologist> {
+    await this.psychologist(psychologistId, tenantId);
 
     return this.prisma.psychologist.update({
       where: { id: psychologistId },
-      data: { clinicId: null },
+      data: {
+        clinic: {
+          disconnect: true,
+        },
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            role: true,
+            createdAt: true,
+            updatedAt: true,
+            phone: true,
+            tenantId: true,
+          },
+        },
+        clinic: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                email: true,
+                name: true,
+                role: true,
+                createdAt: true,
+                updatedAt: true,
+                phone: true,
+                tenantId: true,
+              },
+            },
+          },
+        },
+        patients: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                email: true,
+                name: true,
+                role: true,
+                createdAt: true,
+                updatedAt: true,
+                phone: true,
+                tenantId: true,
+              },
+            },
+          },
+        },
+      },
     });
   }
 }

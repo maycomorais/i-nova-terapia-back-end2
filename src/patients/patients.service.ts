@@ -1,184 +1,430 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+// src/patients/patients.service.ts
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  Logger,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { Patient, Prisma } from '@prisma/client';
+import { Patient, Prisma, Role } from '@prisma/client';
 
+/**
+ * Serviço responsável pelo gerenciamento de pacientes
+ * Lida com criação, atualização, busca e remoção de pacientes
+ * Mantém a integridade dos dados e regras de negócio relacionadas a pacientes
+ */
 @Injectable()
 export class PatientsService {
+  private readonly logger = new Logger(PatientsService.name);
+
   constructor(private prisma: PrismaService) {}
 
   /**
-   * Busca um paciente específico com base em um critério único
-   * @param patientWhereUniqueInput Critério de busca único (ex: id, email)
-   * @returns O paciente encontrado ou null se não existir
+   * Busca um paciente específico pelo ID
+   * Inclui todas as relações relevantes (usuário, psicólogo, clínica, etc)
    */
-  async patient(
-    patientWhereUniqueInput: Prisma.PatientWhereUniqueInput,
-  ): Promise<Patient | null> {
-    return this.prisma.patient.findUnique({
-      where: patientWhereUniqueInput,
+  async patient(patientId: number, tenantId: string): Promise<Patient | null> {
+    const patient = await this.prisma.patient.findFirst({
+      where: {
+        id: patientId,
+        tenantId,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            role: true,
+            refreshToken: true,
+            createdAt: true,
+            updatedAt: true,
+            phone: true,
+            tenantId: true,
+          },
+        },
+        psychologist: true,
+        clinic: true,
+        appointments: true,
+        moodDiaries: true,
+      },
     });
+
+    if (!patient) {
+      throw new NotFoundException(
+        `Paciente com ID ${patientId} não encontrado`,
+      );
+    }
+
+    return patient;
   }
 
   /**
-   * Busca múltiplos pacientes com base em vários critérios
-   * @param params Objeto contendo opções de busca, paginação e ordenação
-   * @returns Array de pacientes que correspondem aos critérios
+   * Lista pacientes com filtros e paginação
+   * Considera o papel do usuário para filtrar os resultados apropriadamente
    */
   async patients(params: {
     skip?: number;
     take?: number;
-    cursor?: Prisma.PatientWhereUniqueInput;
     where?: Prisma.PatientWhereInput;
     orderBy?: Prisma.PatientOrderByWithRelationInput;
+    tenantId: string;
+    userId?: number;
+    userRole?: Role;
   }): Promise<Patient[]> {
-    const { skip, take, cursor, where, orderBy } = params;
+    const { skip, take, where, orderBy, tenantId, userId, userRole } = params;
+
+    let filter: Prisma.PatientWhereInput = {
+      ...where,
+      tenantId,
+    };
+
+    // Filtrar pacientes baseado no papel do usuário
+    if (userRole === Role.PSYCHOLOGIST) {
+      filter = {
+        ...filter,
+        psychologist: {
+          userId: userId,
+        },
+      };
+    } else if (userRole === Role.CLINIC) {
+      filter = {
+        ...filter,
+        clinic: {
+          userId: userId,
+        },
+      };
+    }
+
     return this.prisma.patient.findMany({
       skip,
       take,
-      cursor,
-      where,
-      orderBy,
+      where: filter,
+      orderBy: {
+        user: {
+          name: 'asc',
+        },
+        ...orderBy,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            role: true,
+            refreshToken: true,
+            createdAt: true,
+            updatedAt: true,
+            phone: true,
+            tenantId: true,
+          },
+        },
+        psychologist: true,
+        clinic: true,
+        appointments: true,
+        moodDiaries: true,
+      },
     });
   }
 
   /**
    * Cria um novo paciente
-   * @param data Dados do paciente a ser criado
-   * @returns O paciente criado
+   * Realiza validações de dados únicos e cria relações necessárias
    */
-  async createPatient(data: Prisma.PatientCreateInput): Promise<Patient> {
-    return this.prisma.patient.create({
-      data,
+  async createPatient(
+    data: Prisma.PatientCreateInput,
+    tenantId: string,
+  ): Promise<Patient> {
+    this.logger.debug(`Criando paciente para tenant ${tenantId}`);
+
+    // Verificar se CPF já existe
+    const existingCPF = await this.prisma.patient.findFirst({
+      where: {
+        cpf: data.cpf,
+        tenantId,
+      },
     });
+
+    if (existingCPF) {
+      throw new ForbiddenException('CPF já cadastrado no sistema');
+    }
+
+    try {
+      // Garantir o tenantId no usuário se houver criação
+      if (data.user?.create) {
+        data.user.create = {
+          ...data.user.create,
+          tenantId,
+        };
+      }
+
+      // Criar o paciente com todas as relações
+      const patient = await this.prisma.patient.create({
+        data: {
+          ...data,
+          tenantId,
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+              name: true,
+              role: true,
+              refreshToken: true,
+              createdAt: true,
+              updatedAt: true,
+              phone: true,
+              tenantId: true,
+            },
+          },
+          psychologist: true,
+          clinic: true,
+          appointments: true,
+          moodDiaries: true,
+        },
+      });
+
+      this.logger.debug(`Paciente criado com ID ${patient.id}`);
+      return patient;
+    } catch (error) {
+      this.logger.error(`Erro ao criar paciente: ${error.message}`);
+      if (error.code === 'P2002') {
+        throw new ForbiddenException('CPF ou email já cadastrado no sistema');
+      }
+      throw error;
+    }
   }
 
   /**
    * Atualiza os dados de um paciente existente
-   * @param params Objeto contendo o critério de busca e os dados a serem atualizados
-   * @returns O paciente atualizado
+   * Inclui validações de permissão e dados únicos
    */
   async updatePatient(params: {
-    where: Prisma.PatientWhereUniqueInput;
+    id: number;
     data: Prisma.PatientUpdateInput;
+    tenantId: string;
+    userId?: number;
+    userRole?: Role;
   }): Promise<Patient> {
-    const { where, data } = params;
+    const { id, data, tenantId, userId, userRole } = params;
+
+    // Verificar se o paciente existe e pertence ao tenant
+    await this.patient(id, tenantId);
+
+    // Verificar permissões
+    if (userRole === Role.PATIENT && userId !== id) {
+      throw new ForbiddenException(
+        'Paciente só pode atualizar seus próprios dados',
+      );
+    }
+
+    // Verificar CPF se estiver sendo atualizado
+    if (data.cpf) {
+      const existingCPF = await this.prisma.patient.findFirst({
+        where: {
+          cpf: data.cpf as string,
+          tenantId,
+          NOT: { id },
+        },
+      });
+
+      if (existingCPF) {
+        throw new ForbiddenException('CPF já cadastrado no sistema');
+      }
+    }
+
+    // Se for o próprio paciente atualizando, limitar campos que podem ser atualizados
+    if (userRole === Role.PATIENT) {
+      const allowedFields = ['address', 'phone'];
+      Object.keys(data).forEach((key) => {
+        if (!allowedFields.includes(key)) {
+          delete data[key];
+        }
+      });
+    }
+
     return this.prisma.patient.update({
+      where: { id },
       data,
-      where,
+      include: {
+        user: true,
+        psychologist: true,
+        clinic: true,
+        appointments: true,
+        moodDiaries: true,
+      },
     });
   }
 
   /**
-   * Remove um paciente do banco de dados
-   * @param where Critério único para identificar o paciente a ser removido
-   * @returns O paciente removido
+   * Remove um paciente do sistema
+   * Verifica se não há consultas associadas antes da remoção
    */
-  async deletePatient(where: Prisma.PatientWhereUniqueInput): Promise<Patient> {
+  async deletePatient(id: number, tenantId: string): Promise<Patient> {
+    // Verificar se o paciente existe e pertence ao tenant
+    await this.patient(id, tenantId);
+
+    // Verificar se possui consultas
+    const hasAppointments = await this.prisma.appointment.count({
+      where: {
+        patientId: id,
+        tenantId,
+      },
+    });
+
+    if (hasAppointments > 0) {
+      throw new ForbiddenException(
+        'Não é possível excluir um paciente que possui consultas registradas',
+      );
+    }
+
     return this.prisma.patient.delete({
-      where,
+      where: { id },
+      include: {
+        user: true,
+        psychologist: true,
+        clinic: true,
+        appointments: true,
+        moodDiaries: true,
+      },
     });
   }
 
   /**
    * Vincula um paciente a um psicólogo
-   * @param patientId ID do paciente
-   * @param psychologistId ID do psicólogo
-   * @returns O paciente atualizado
+   * Verifica a existência de ambos no mesmo tenant
    */
   async linkToPsychologist(
     patientId: number,
     psychologistId: number,
+    tenantId: string,
   ): Promise<Patient> {
-    const patient = await this.prisma.patient.findUnique({
-      where: { id: patientId },
-    });
+    // Verificar se o paciente existe e pertence ao tenant
+    await this.patient(patientId, tenantId);
 
-    if (!patient) {
-      throw new NotFoundException(`Patient with ID ${patientId} not found`);
-    }
-
-    const psychologist = await this.prisma.psychologist.findUnique({
-      where: { id: psychologistId },
+    const psychologist = await this.prisma.psychologist.findFirst({
+      where: {
+        id: psychologistId,
+        tenantId,
+      },
     });
 
     if (!psychologist) {
       throw new NotFoundException(
-        `Psychologist with ID ${psychologistId} not found`,
+        `Psicólogo com ID ${psychologistId} não encontrado`,
       );
     }
 
     return this.prisma.patient.update({
       where: { id: patientId },
-      data: { psychologistId: psychologistId },
+      data: {
+        psychologist: {
+          connect: { id: psychologistId },
+        },
+      },
+      include: {
+        user: true,
+        psychologist: true,
+        clinic: true,
+        appointments: true,
+        moodDiaries: true,
+      },
     });
   }
 
   /**
    * Vincula um paciente a uma clínica
-   * @param patientId ID do paciente
-   * @param clinicId ID da clínica
-   * @returns O paciente atualizado
+   * Verifica a existência de ambos no mesmo tenant
    */
-  async linkToClinic(patientId: number, clinicId: number): Promise<Patient> {
-    const patient = await this.prisma.patient.findUnique({
-      where: { id: patientId },
-    });
+  async linkToClinic(
+    patientId: number,
+    clinicId: number,
+    tenantId: string,
+  ): Promise<Patient> {
+    // Verificar se o paciente existe e pertence ao tenant
+    await this.patient(patientId, tenantId);
 
-    if (!patient) {
-      throw new NotFoundException(`Patient with ID ${patientId} not found`);
-    }
-
-    const clinic = await this.prisma.clinic.findUnique({
-      where: { id: clinicId },
+    const clinic = await this.prisma.clinic.findFirst({
+      where: {
+        id: clinicId,
+        tenantId,
+      },
     });
 
     if (!clinic) {
-      throw new NotFoundException(`Clinic with ID ${clinicId} not found`);
+      throw new NotFoundException(`Clínica com ID ${clinicId} não encontrada`);
     }
 
     return this.prisma.patient.update({
       where: { id: patientId },
-      data: { clinicId: clinicId },
+      data: {
+        clinic: {
+          connect: { id: clinicId },
+        },
+      },
+      include: {
+        user: true,
+        psychologist: true,
+        clinic: true,
+        appointments: true,
+        moodDiaries: true,
+      },
     });
   }
 
   /**
-   * Remove a vinculação de um paciente com um psicólogo
-   * @param patientId ID do paciente
-   * @returns O paciente atualizado
+   * Remove o vínculo entre paciente e psicólogo
    */
-  async unlinkFromPsychologist(patientId: number): Promise<Patient> {
-    const patient = await this.prisma.patient.findUnique({
-      where: { id: patientId },
-    });
-
-    if (!patient) {
-      throw new NotFoundException(`Patient with ID ${patientId} not found`);
-    }
+  async unlinkFromPsychologist(
+    patientId: number,
+    tenantId: string,
+  ): Promise<Patient> {
+    // Verificar se o paciente existe e pertence ao tenant
+    await this.patient(patientId, tenantId);
 
     return this.prisma.patient.update({
       where: { id: patientId },
-      data: { psychologistId: null },
+      data: {
+        psychologist: {
+          disconnect: true,
+        },
+      },
+      include: {
+        user: true,
+        psychologist: true,
+        clinic: true,
+        appointments: true,
+        moodDiaries: true,
+      },
     });
   }
 
   /**
-   * Remove a vinculação de um paciente com uma clínica
-   * @param patientId ID do paciente
-   * @returns O paciente atualizado
+   * Remove o vínculo entre paciente e clínica
    */
-  async unlinkFromClinic(patientId: number): Promise<Patient> {
-    const patient = await this.prisma.patient.findUnique({
-      where: { id: patientId },
-    });
-
-    if (!patient) {
-      throw new NotFoundException(`Patient with ID ${patientId} not found`);
-    }
+  async unlinkFromClinic(
+    patientId: number,
+    tenantId: string,
+  ): Promise<Patient> {
+    // Verificar se o paciente existe e pertence ao tenant
+    await this.patient(patientId, tenantId);
 
     return this.prisma.patient.update({
       where: { id: patientId },
-      data: { clinicId: null },
+      data: {
+        clinic: {
+          disconnect: true,
+        },
+      },
+      include: {
+        user: true,
+        psychologist: true,
+        clinic: true,
+        appointments: true,
+        moodDiaries: true,
+      },
     });
   }
 }

@@ -1,138 +1,292 @@
-import { Injectable } from '@nestjs/common';
+// src/users/users.service.ts
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  Logger,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { User, Prisma, Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import { v4 as uuidv4 } from 'uuid';
 
+/**
+ * Serviço responsável pelo gerenciamento de usuários
+ * Lida com criação, atualização, busca e remoção de usuários master
+ * Mantém a integridade dos dados e regras de negócio relacionadas a usuários
+ */
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(private prisma: PrismaService) {}
 
   /**
+   * Gera um novo ID de tenant
+   */
+  private generateTenantId(): string {
+    return uuidv4();
+  }
+
+  /**
    * Cria um novo usuário master
-   * @param data Dados do usuário master a ser criado
-   * @returns O usuário master criado
+   * Inclui configurações de notificação padrão
    */
   async createMaster(data: {
     email: string;
     name: string;
     password: string;
-  }): Promise<User> {
+    tenantId: string;
+  }): Promise<Omit<User, 'password'>> {
+    this.logger.debug(`Criando usuário master para tenant ${data.tenantId}`);
+
+    // Verificar se já existe um usuário com este email
+    const existingUser = await this.findMasterByEmail(data.email);
+    if (existingUser) {
+      throw new ForbiddenException('Email já está em uso');
+    }
+
     const hashedPassword = await bcrypt.hash(data.password, 10);
-    return this.prisma.user.create({
-      data: {
-        email: data.email,
-        name: data.name,
-        password: hashedPassword,
-        role: Role.MASTER,
-        notificationSettings: {
-          create: {
-            emailNotifications: true,
-            smsNotifications: false,
-            pushNotifications: false,
-            reminderTimeMinutes: 1440,
+    const finalTenantId = data.tenantId || this.generateTenantId();
+
+    const user = await this.prisma.$transaction(async (prisma) => {
+      return await prisma.user.create({
+        data: {
+          email: data.email,
+          name: data.name,
+          password: hashedPassword,
+          role: Role.MASTER,
+          tenantId: finalTenantId,
+          notificationSettings: {
+            create: {
+              emailNotifications: true,
+              smsNotifications: false,
+              pushNotifications: false,
+              reminderTimeMinutes: 1440,
+            },
+          },
+          master: {
+            create: {
+              tenantId: finalTenantId,
+            },
           },
         },
-      },
-      include: {
-        notificationSettings: true,
-      },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+          refreshToken: true,
+          createdAt: true,
+          updatedAt: true,
+          phone: true,
+          tenantId: true,
+          notificationSettings: true,
+          master: true,
+        },
+      });
     });
+
+    return user;
   }
 
   /**
-   * Busca um usuário master pelo e-mail
-   * @param email E-mail do usuário master
-   * @returns O usuário master encontrado ou null se não existir
+   * Busca um usuário master pelo email
    */
-  async findMasterByEmail(email: string): Promise<User | null> {
-    return this.prisma.user.findUnique({
-      where: { email, role: Role.MASTER },
-      include: {
+  async findMasterByEmail(
+    email: string,
+    tenantId?: string,
+  ): Promise<Omit<User, 'password'> | null> {
+    return this.prisma.user.findFirst({
+      where: {
+        email,
+        role: Role.MASTER,
+        ...(tenantId && { tenantId }),
+      },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        refreshToken: true,
+        createdAt: true,
+        updatedAt: true,
+        phone: true,
+        tenantId: true,
         notificationSettings: true,
+        master: true,
       },
     });
   }
 
   /**
    * Busca um usuário master pelo ID
-   * @param id ID do usuário master
-   * @returns O usuário master encontrado ou null se não existir
    */
-  async findMasterById(id: number): Promise<User | null> {
-    return this.prisma.user.findUnique({
-      where: { id, role: Role.MASTER },
-      include: {
+  async findMasterById(
+    id: number,
+    tenantId: string,
+  ): Promise<Omit<User, 'password'> | null> {
+    const user = await this.prisma.user.findFirst({
+      where: {
+        id,
+        role: Role.MASTER,
+        tenantId,
+      },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        refreshToken: true,
+        createdAt: true,
+        updatedAt: true,
+        phone: true,
+        tenantId: true,
         notificationSettings: true,
+        master: true,
       },
     });
+
+    if (!user) {
+      throw new NotFoundException(`Usuário master com ID ${id} não encontrado`);
+    }
+
+    return user;
   }
 
   /**
-   * Busca todos os usuários master
-   * @returns Array de usuários master
+   * Lista todos os usuários master de um tenant
    */
-  async findAllMasters(): Promise<User[]> {
+  async findAllMasters(tenantId: string): Promise<Omit<User, 'password'>[]> {
     return this.prisma.user.findMany({
-      where: { role: Role.MASTER },
-      include: {
+      where: {
+        role: Role.MASTER,
+        tenantId,
+      },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        refreshToken: true,
+        createdAt: true,
+        updatedAt: true,
+        phone: true,
+        tenantId: true,
         notificationSettings: true,
+        master: true,
       },
     });
   }
 
   /**
    * Atualiza um usuário master
-   * @param id ID do usuário master a ser atualizado
-   * @param data Dados a serem atualizados
-   * @returns O usuário master atualizado
    */
-  async updateMaster(id: number, data: Prisma.UserUpdateInput): Promise<User> {
+  async updateMaster(
+    id: number,
+    data: Prisma.UserUpdateInput,
+    tenantId: string,
+  ): Promise<Omit<User, 'password'>> {
+    // Verificar se o usuário existe no tenant
+    await this.findMasterById(id, tenantId);
+
+    // Se estiver atualizando o email, verificar se já existe
+    if (data.email) {
+      const existingUser = await this.findMasterByEmail(
+        data.email as string,
+        tenantId,
+      );
+      if (existingUser && existingUser.id !== id) {
+        throw new ForbiddenException('Email já está em uso');
+      }
+    }
+
+    // Se houver senha, fazer hash
+    if (data.password) {
+      data.password = await bcrypt.hash(data.password as string, 10);
+    }
+
     return this.prisma.user.update({
-      where: { id, role: Role.MASTER },
+      where: {
+        id,
+        tenantId,
+      },
       data,
-      include: {
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        refreshToken: true,
+        createdAt: true,
+        updatedAt: true,
+        phone: true,
+        tenantId: true,
         notificationSettings: true,
+        master: true,
       },
     });
   }
 
   /**
    * Remove um usuário master
-   * @param id ID do usuário master a ser removido
-   * @returns O usuário master removido
    */
-  async deleteMaster(id: number): Promise<User> {
+  async deleteMaster(
+    id: number,
+    tenantId: string,
+  ): Promise<Omit<User, 'password'>> {
+    // Verificar se o usuário existe no tenant
+    await this.findMasterById(id, tenantId);
+
     return this.prisma.user.delete({
-      where: { id, role: Role.MASTER },
-      include: {
+      where: {
+        id,
+        tenantId,
+      },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        refreshToken: true,
+        createdAt: true,
+        updatedAt: true,
+        phone: true,
+        tenantId: true,
         notificationSettings: true,
+        master: true,
       },
     });
   }
 
   /**
    * Obtém as configurações de notificação de um usuário
-   * @param userId ID do usuário
-   * @returns As configurações de notificação do usuário ou null se não existirem
    */
-  async getNotificationSettings(userId: number) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      include: {
+  async getNotificationSettings(userId: number, tenantId: string) {
+    const user = await this.prisma.user.findFirst({
+      where: {
+        id: userId,
+        tenantId,
+      },
+      select: {
+        id: true,
         notificationSettings: true,
       },
     });
+
+    if (!user) {
+      throw new NotFoundException(`Usuário com ID ${userId} não encontrado`);
+    }
+
     return user?.notificationSettings || null;
   }
 
   /**
    * Atualiza as configurações de notificação de um usuário
-   * @param userId ID do usuário
-   * @param data Novas configurações de notificação
-   * @returns As configurações de notificação atualizadas
    */
   async updateNotificationSettings(
     userId: number,
+    tenantId: string,
     data: {
       emailNotifications?: boolean;
       smsNotifications?: boolean;
@@ -140,6 +294,21 @@ export class UsersService {
       reminderTimeMinutes?: number;
     },
   ) {
+    // Verificar se o usuário existe no tenant
+    const user = await this.prisma.user.findFirst({
+      where: {
+        id: userId,
+        tenantId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException(`Usuário com ID ${userId} não encontrado`);
+    }
+
     const existingSettings = await this.prisma.notificationSettings.findUnique({
       where: { userId },
     });

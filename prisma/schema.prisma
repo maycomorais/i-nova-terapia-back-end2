@@ -13,6 +13,7 @@ model User {
   name                 String
   password             String
   role                 Role
+  refreshToken         String?                // Adicionar este campo
   createdAt            DateTime               @default(now())
   updatedAt            DateTime               @updatedAt
   master               Master?
@@ -54,6 +55,9 @@ model Clinic {
   tenantId      String
   psychologists Psychologist[]
   patients      Patient[]
+  asaasId       String?       // ID do cliente no Asaas
+  expenses      Expense[]
+  bankAccount   BankAccount?
 }
 
 model Psychologist {
@@ -70,6 +74,9 @@ model Psychologist {
   patients      Patient[]
   appointments  Appointment[]
   AvailableSlot AvailableSlot[]
+  asaasId       String?         // ID do cliente no Asaas
+  bankAccount   BankAccount?
+  splitConfig   SplitConfig?    // Configuração de divisão de pagamentos
 }
 
 model Patient {
@@ -86,21 +93,106 @@ model Patient {
   tenantId       String
   appointments   Appointment[]
   moodDiaries    MoodDiary[]
+  asaasId        String?       // ID do cliente no Asaas
 }
 
 model Appointment {
-  id             Int               @id @default(autoincrement())
-  patient        Patient           @relation(fields: [patientId], references: [id])
-  patientId      Int
-  psychologist   Psychologist      @relation(fields: [psychologistId], references: [id])
-  psychologistId Int
-  dateTime       DateTime
-  duration       Int
-  status         AppointmentStatus
-  notes          String?
-  tenantId       String
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
+  id                Int               @id @default(autoincrement())
+  patient           Patient           @relation(fields: [patientId], references: [id])
+  patientId         Int
+  psychologist      Psychologist      @relation(fields: [psychologistId], references: [id])
+  psychologistId    Int
+  dateTime         DateTime
+  duration         Int
+  status           AppointmentStatus
+  notes            String?
+  value            Decimal           @db.Decimal(10,2)
+  tenantId         String
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  payment          Payment?
+  healthInsurance  HealthInsurance?  @relation(fields: [healthInsuranceId], references: [id])
+  healthInsuranceId Int?
+}
+
+model Payment {
+  id                Int             @id @default(autoincrement())
+  appointment       Appointment     @relation(fields: [appointmentId], references: [id])
+  appointmentId     Int             @unique
+  amount           Decimal         @db.Decimal(10,2)
+  method           PaymentMethod
+  status           PaymentStatus
+  discount         Decimal?        @db.Decimal(10,2)
+  installments     Int?
+  asaasPaymentId   String?         // ID do pagamento no Asaas
+  asaasInvoiceUrl  String?         // URL da fatura no Asaas
+  asaasPixCode     String?         // Código PIX gerado pelo Asaas
+  asaasBoletoCode  String?         // Código de barras do boleto
+  dueDate         DateTime
+  paidAt          DateTime?
+  notes           String?
+  tenantId        String
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+}
+
+model SplitConfig {
+  id              Int           @id @default(autoincrement())
+  psychologist    Psychologist  @relation(fields: [psychologistId], references: [id])
+  psychologistId  Int           @unique
+  clinicPercentage Decimal      @db.Decimal(5,2)  // Percentual que vai para a clínica
+  enabled         Boolean       @default(true)
+  tenantId        String
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+}
+
+model BankAccount {
+  id            Int           @id @default(autoincrement())
+  bank          String
+  accountType   BankAccountType
+  agency        String
+  accountNumber String
+  digit        String
+  ownerName    String
+  ownerCpfCnpj String
+  clinic       Clinic?       @relation(fields: [clinicId], references: [id])
+  clinicId     Int?         @unique
+  psychologist Psychologist? @relation(fields: [psychologistId], references: [id])
+  psychologistId Int?        @unique
+  asaasId      String?      // ID da conta bancária no Asaas
+  tenantId     String
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+}
+
+model Expense {
+  id          Int             @id @default(autoincrement())
+  clinic      Clinic          @relation(fields: [clinicId], references: [id])
+  clinicId    Int
+  category    ExpenseCategory
+  description String
+  amount      Decimal         @db.Decimal(10,2)
+  dueDate     DateTime
+  paidAt      DateTime?
+  recurring   Boolean         @default(false)
+  frequency   ExpenseFrequency?
+  status      ExpenseStatus
+  notes       String?
+  tenantId    String
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+}
+
+model HealthInsurance {
+  id           Int           @id @default(autoincrement())
+  name         String
+  coverage     Decimal       @db.Decimal(10,2)  // Percentual de cobertura
+  active       Boolean       @default(true)
+  appointments Appointment[]
+  tenantId     String
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 }
 
 model Holiday {
@@ -110,6 +202,7 @@ model Holiday {
   isNational  Boolean
   createdBy   User     @relation(fields: [createdById], references: [id])
   createdById Int
+  tenantId    String
 }
 
 model AvailableSlot {
@@ -118,7 +211,8 @@ model AvailableSlot {
   psychologistId Int
   startTime      DateTime
   endTime        DateTime
-  isAvailable    Boolean
+  isAvailable    Boolean 
+  tenantId       String
 }
 
 model MoodDiary {
@@ -130,6 +224,7 @@ model MoodDiary {
   notes     String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  tenantId  String
 }
 
 enum Role {
@@ -145,3 +240,53 @@ enum AppointmentStatus {
   CANCELLED_BY_PATIENT
   CANCELLED_BY_PROFESSIONAL
 }
+
+enum PaymentMethod {
+  BOLETO
+  CREDIT_CARD
+  DEBIT_CARD
+  PIX
+  HEALTH_INSURANCE
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  OVERDUE
+  CANCELLED
+  REFUNDED
+  CONFIRMED    // Para pagamentos via PIX
+  RECEIVED     // Para pagamentos já recebidos na conta
+}
+
+enum BankAccountType {
+  CHECKING
+  SAVINGS
+}
+
+enum ExpenseCategory {
+  RENT
+  UTILITIES
+  PAYROLL
+  SUPPLIES
+  MARKETING
+  SOFTWARE
+  MAINTENANCE
+  TAXES
+  OTHER
+}
+
+enum ExpenseFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+  YEARLY
+  ONCE
+}
+
+enum ExpenseStatus {
+  PENDING
+  PAID
+  OVERDUE
+  CANCELLED
+} 
