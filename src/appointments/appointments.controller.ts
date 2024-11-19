@@ -58,6 +58,7 @@ export class AppointmentsController {
         status: createAppointmentDto.status,
         notes: createAppointmentDto.notes,
         tenantId,
+        endTime: '',
       },
       user.id,
       tenantId,

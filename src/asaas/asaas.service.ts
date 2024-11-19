@@ -126,4 +126,20 @@ export class AsaasService {
       throw error;
     }
   }
+
+  async createTransfer(data: {
+    amount: number;
+    bankAccount: string;
+    description: string;
+  }): Promise<any> {
+    try {
+      const { data: response } = await this.api.post('/transfers', data);
+      return response;
+    } catch (error) {
+      this.logger.error(
+        `Erro ao criar transferência no ASAAS: ${error.message}`,
+      );
+      throw error;
+    }
+  }
 }

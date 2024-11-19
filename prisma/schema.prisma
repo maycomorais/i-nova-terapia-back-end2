@@ -8,14 +8,14 @@ datasource db {
 }
 
 model User {
-  id                   Int                    @id @default(autoincrement())
-  email                String                 @unique
+  id                   Int                   @id @default(autoincrement())
+  email                String                @unique
   name                 String
   password             String
   role                 Role
-  refreshToken         String?                // Adicionar este campo
-  createdAt            DateTime               @default(now())
-  updatedAt            DateTime               @updatedAt
+  refreshToken         String? // Adicionar este campo
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
   master               Master?
   clinic               Clinic?
   psychologist         Psychologist?
@@ -24,6 +24,9 @@ model User {
   notificationSettings NotificationSettings?
   phone                String?
   tenantId             String
+
+  Document     Document[]
+  PaymentSplit PaymentSplit[]
 }
 
 model NotificationSettings {
@@ -37,11 +40,10 @@ model NotificationSettings {
 }
 
 model Master {
-  id     Int  @id @default(autoincrement())
-  user   User @relation(fields: [userId], references: [id])
-  userId Int  @unique
-  tenantId    String
-  
+  id       Int    @id @default(autoincrement())
+  user     User   @relation(fields: [userId], references: [id])
+  userId   Int    @unique
+  tenantId String
 }
 
 model Clinic {
@@ -55,7 +57,7 @@ model Clinic {
   tenantId      String
   psychologists Psychologist[]
   patients      Patient[]
-  asaasId       String?       // ID do cliente no Asaas
+  asaasId       String? // ID do cliente no Asaas
   expenses      Expense[]
   bankAccount   BankAccount?
 }
@@ -74,9 +76,9 @@ model Psychologist {
   patients      Patient[]
   appointments  Appointment[]
   AvailableSlot AvailableSlot[]
-  asaasId       String?         // ID do cliente no Asaas
+  asaasId       String? // ID do cliente no Asaas
   bankAccount   BankAccount?
-  splitConfig   SplitConfig?    // Configuração de divisão de pagamentos
+  splitConfig   SplitConfig? // Configuração de divisão de pagamentos
 }
 
 model Patient {
@@ -93,101 +95,103 @@ model Patient {
   tenantId       String
   appointments   Appointment[]
   moodDiaries    MoodDiary[]
-  asaasId        String?       // ID do cliente no Asaas
+  asaasId        String? // ID do cliente no Asaas
 }
 
 model Appointment {
-  id                Int               @id @default(autoincrement())
-  patient           Patient           @relation(fields: [patientId], references: [id])
-  patientId         Int
-  psychologist      Psychologist      @relation(fields: [psychologistId], references: [id])
-  psychologistId    Int
-  dateTime         DateTime
-  duration         Int
-  status           AppointmentStatus
-  notes            String?
-  value            Decimal           @db.Decimal(10,2)
-  tenantId         String
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
-  payment          Payment?
-  healthInsurance  HealthInsurance?  @relation(fields: [healthInsuranceId], references: [id])
+  id             Int               @id @default(autoincrement())
+  patient        Patient           @relation(fields: [patientId], references: [id])
+  patientId      Int
+  psychologist   Psychologist      @relation(fields: [psychologistId], references: [id])
+  psychologistId Int
+  dateTime       DateTime
+  endTime        DateTime         
+  duration       Int
+  status         AppointmentStatus
+  notes          String?
+  value          Decimal          @db.Decimal(10, 2)
+  tenantId       String
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  payment        Payment?
+  healthInsurance   HealthInsurance?  @relation(fields: [healthInsuranceId], references: [id])
   healthInsuranceId Int?
 }
 
 model Payment {
-  id                Int             @id @default(autoincrement())
-  appointment       Appointment     @relation(fields: [appointmentId], references: [id])
-  appointmentId     Int             @unique
-  amount           Decimal         @db.Decimal(10,2)
-  method           PaymentMethod
-  status           PaymentStatus
-  discount         Decimal?        @db.Decimal(10,2)
-  installments     Int?
-  asaasPaymentId   String?         // ID do pagamento no Asaas
-  asaasInvoiceUrl  String?         // URL da fatura no Asaas
-  asaasPixCode     String?         // Código PIX gerado pelo Asaas
-  asaasBoletoCode  String?         // Código de barras do boleto
+  id              Int            @id @default(autoincrement())
+  appointment     Appointment    @relation(fields: [appointmentId], references: [id])
+  appointmentId   Int            @unique
+  amount          Decimal        @db.Decimal(10, 2)
+  method          PaymentMethod
+  status          PaymentStatus
+  discount        Decimal?       @db.Decimal(10, 2)
+  installments    Int?
+  asaasPaymentId  String? // ID do pagamento no Asaas
+  asaasInvoiceUrl String? // URL da fatura no Asaas
+  asaasPixCode    String? // Código PIX gerado pelo Asaas
+  asaasBoletoCode String? // Código de barras do boleto
   dueDate         DateTime
   paidAt          DateTime?
   notes           String?
   tenantId        String
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  paymentSplits   PaymentSplit[]
 }
 
 model SplitConfig {
-  id              Int           @id @default(autoincrement())
-  psychologist    Psychologist  @relation(fields: [psychologistId], references: [id])
-  psychologistId  Int           @unique
-  clinicPercentage Decimal      @db.Decimal(5,2)  // Percentual que vai para a clínica
-  enabled         Boolean       @default(true)
-  tenantId        String
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  id               Int          @id @default(autoincrement())
+  psychologist     Psychologist @relation(fields: [psychologistId], references: [id])
+  psychologistId   Int          @unique
+  clinicPercentage Decimal      @db.Decimal(5, 2) // Percentual que vai para a clínica
+  enabled          Boolean      @default(true)
+  tenantId         String
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
 }
 
 model BankAccount {
-  id            Int           @id @default(autoincrement())
-  bank          String
-  accountType   BankAccountType
-  agency        String
-  accountNumber String
-  digit        String
-  ownerName    String
-  ownerCpfCnpj String
-  clinic       Clinic?       @relation(fields: [clinicId], references: [id])
-  clinicId     Int?         @unique
-  psychologist Psychologist? @relation(fields: [psychologistId], references: [id])
-  psychologistId Int?        @unique
-  asaasId      String?      // ID da conta bancária no Asaas
-  tenantId     String
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  id             Int             @id @default(autoincrement())
+  bank           String
+  accountType    BankAccountType
+  agency         String
+  accountNumber  String
+  digit          String
+  ownerName      String
+  ownerCpfCnpj   String
+  clinic         Clinic?         @relation(fields: [clinicId], references: [id])
+  clinicId       Int?            @unique
+  psychologist   Psychologist?   @relation(fields: [psychologistId], references: [id])
+  psychologistId Int?            @unique
+  asaasId        String? // ID da conta bancária no Asaas
+  tenantId       String
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
 }
 
 model Expense {
-  id          Int             @id @default(autoincrement())
-  clinic      Clinic          @relation(fields: [clinicId], references: [id])
+  id          Int               @id @default(autoincrement())
+  clinic      Clinic            @relation(fields: [clinicId], references: [id])
   clinicId    Int
   category    ExpenseCategory
   description String
-  amount      Decimal         @db.Decimal(10,2)
+  amount      Decimal           @db.Decimal(10, 2)
   dueDate     DateTime
   paidAt      DateTime?
-  recurring   Boolean         @default(false)
+  recurring   Boolean           @default(false)
   frequency   ExpenseFrequency?
   status      ExpenseStatus
   notes       String?
   tenantId    String
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
 }
 
 model HealthInsurance {
   id           Int           @id @default(autoincrement())
   name         String
-  coverage     Decimal       @db.Decimal(10,2)  // Percentual de cobertura
+  coverage     Decimal       @db.Decimal(10, 2) // Percentual de cobertura
   active       Boolean       @default(true)
   appointments Appointment[]
   tenantId     String
@@ -211,7 +215,7 @@ model AvailableSlot {
   psychologistId Int
   startTime      DateTime
   endTime        DateTime
-  isAvailable    Boolean 
+  isAvailable    Boolean
   tenantId       String
 }
 
@@ -225,6 +229,71 @@ model MoodDiary {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   tenantId  String
+}
+
+model Document {
+  id         Int                @id @default(autoincrement())
+  type       DocumentType
+  format     DocumentFormat
+  status     DocumentStatus     @default(PENDING)
+  permission DocumentPermission @default(PRIVATE)
+  url        String?
+  data       Json?
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+  user       User               @relation(fields: [userId], references: [id])
+  userId     Int
+  tenantId   String
+
+  @@map("documents")
+}
+
+model PaymentSplit {
+  id          Int       @id @default(autoincrement())
+  payment     Payment   @relation(fields: [paymentId], references: [id])
+  paymentId   Int
+  receiverId  Int
+  percentage  Decimal   @db.Decimal(5, 2)
+  processed   Boolean   @default(false)
+  processedAt DateTime?
+  tenantId    String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  User        User?     @relation(fields: [userId], references: [id])
+  userId      Int?
+
+  @@map("payment_splits")
+}
+
+enum DocumentType {
+  PATIENT_LIST
+  CLINIC_LIST
+  PSYCHOLOGIST_LIST
+  FINANCIAL_REPORT
+  MOOD_DIARY_REPORT
+  APPOINTMENT_HISTORY
+  PATIENT_CARD
+  PAYMENT_RECEIPT
+  DECLARATION_OF_SERVICE
+}
+
+enum DocumentFormat {
+  PDF
+  XML
+  HTML
+}
+
+enum DocumentStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  ERROR
+}
+
+enum DocumentPermission {
+  PRIVATE
+  RESTRICTED
+  PUBLIC
 }
 
 enum Role {
@@ -255,8 +324,8 @@ enum PaymentStatus {
   OVERDUE
   CANCELLED
   REFUNDED
-  CONFIRMED    // Para pagamentos via PIX
-  RECEIVED     // Para pagamentos já recebidos na conta
+  CONFIRMED // Para pagamentos via PIX
+  RECEIVED // Para pagamentos já recebidos na conta
 }
 
 enum BankAccountType {
@@ -289,4 +358,4 @@ enum ExpenseStatus {
   PAID
   OVERDUE
   CANCELLED
-} 
+}

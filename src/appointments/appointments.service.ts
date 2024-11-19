@@ -1,19 +1,25 @@
 // src/appointments/appointments.service.ts
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CacheService } from '../common/cache/cache.service';
 import { Appointment, AppointmentStatus, Prisma } from '@prisma/client';
 import { Logger } from '@nestjs/common';
+import { IAppointmentsRepository } from '../common/repositories/appointments.repository.interface';
 
 @Injectable()
 export class AppointmentsService {
   private readonly logger = new Logger(AppointmentsService.name);
 
   constructor(
-    private prisma: PrismaService,
-    private notificationsService: NotificationsService,
-    private cacheService: CacheService,
+    @Inject('IAppointmentsRepository')
+    private readonly appointmentsRepository: IAppointmentsRepository,
+    private readonly notificationsService: NotificationsService,
+    private readonly cacheService: CacheService,
   ) {}
 
   async findAll(params: {
@@ -29,54 +35,7 @@ export class AppointmentsService {
       return cached;
     }
 
-    const appointments = await this.prisma.appointment.findMany({
-      skip: params.skip,
-      take: params.take,
-      where: {
-        ...params.where,
-        tenantId: params.tenantId,
-      },
-      include: {
-        patient: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                email: true,
-                name: true,
-                role: true,
-                refreshToken: true,
-                createdAt: true,
-                updatedAt: true,
-                phone: true,
-                tenantId: true,
-              },
-            },
-          },
-        },
-        psychologist: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                email: true,
-                name: true,
-                role: true,
-                refreshToken: true,
-                createdAt: true,
-                updatedAt: true,
-                phone: true,
-                tenantId: true,
-              },
-            },
-          },
-        },
-      },
-      orderBy: {
-        dateTime: 'desc',
-      },
-    });
-
+    const appointments = await this.appointmentsRepository.findAll(params);
     await this.cacheService.set(cacheKey, appointments, 300);
     return appointments;
   }
@@ -89,49 +48,7 @@ export class AppointmentsService {
       return cached;
     }
 
-    const appointment = await this.prisma.appointment.findFirst({
-      where: {
-        id,
-        tenantId,
-      },
-      include: {
-        patient: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                email: true,
-                name: true,
-                role: true,
-                refreshToken: true,
-                createdAt: true,
-                updatedAt: true,
-                phone: true,
-                tenantId: true,
-              },
-            },
-          },
-        },
-        psychologist: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                email: true,
-                name: true,
-                role: true,
-                refreshToken: true,
-                createdAt: true,
-                updatedAt: true,
-                phone: true,
-                tenantId: true,
-              },
-            },
-          },
-        },
-      },
-    });
-
+    const appointment = await this.appointmentsRepository.findOne(id, tenantId);
     if (!appointment) {
       throw new NotFoundException(`Agendamento com ID ${id} não encontrado`);
     }
@@ -147,103 +64,25 @@ export class AppointmentsService {
   ): Promise<Appointment> {
     this.logger.debug(`Criando agendamento para tenant ${tenantId}`);
 
-    // Verificar se paciente e psicólogo existem e pertencem ao mesmo tenant
-    const [patient, psychologist] = await Promise.all([
-      this.prisma.patient.findFirst({
-        where: { id: data.patient.connect.id, tenantId },
-        include: {
-          user: {
-            select: {
-              id: true,
-              email: true,
-              name: true,
-              role: true,
-              refreshToken: true,
-              createdAt: true,
-              updatedAt: true,
-              phone: true,
-              tenantId: true,
-            },
-          },
-        },
-      }),
-      this.prisma.psychologist.findFirst({
-        where: { id: data.psychologist.connect.id, tenantId },
-        include: {
-          user: {
-            select: {
-              id: true,
-              email: true,
-              name: true,
-              role: true,
-              refreshToken: true,
-              createdAt: true,
-              updatedAt: true,
-              phone: true,
-              tenantId: true,
-            },
-          },
-        },
-      }),
-    ]);
-
-    if (!patient) {
-      throw new NotFoundException(
-        `Paciente com ID ${data.patient.connect.id} não encontrado`,
-      );
-    }
-
-    if (!psychologist) {
-      throw new NotFoundException(
-        `Psicólogo com ID ${data.psychologist.connect.id} não encontrado`,
-      );
-    }
-
-    const appointmentData = {
-      ...data,
+    // Verificar conflitos de horário
+    const hasConflict = await this.appointmentsRepository.checkConflicts(
+      data.psychologist.connect.id,
+      data.dateTime as Date,
+      data.duration as number,
       tenantId,
-      status: AppointmentStatus.SCHEDULED,
-    };
+    );
 
-    const appointment = await this.prisma.appointment.create({
-      data: appointmentData,
-      include: {
-        patient: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                email: true,
-                name: true,
-                role: true,
-                refreshToken: true,
-                createdAt: true,
-                updatedAt: true,
-                phone: true,
-                tenantId: true,
-              },
-            },
-          },
-        },
-        psychologist: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                email: true,
-                name: true,
-                role: true,
-                refreshToken: true,
-                createdAt: true,
-                updatedAt: true,
-                phone: true,
-                tenantId: true,
-              },
-            },
-          },
-        },
+    if (hasConflict) {
+      throw new BadRequestException('Conflito de horário detectado');
+    }
+
+    const appointment = await this.appointmentsRepository.create(
+      {
+        ...data,
+        status: AppointmentStatus.SCHEDULED,
       },
-    });
+      tenantId,
+    );
 
     await this.invalidateCache(tenantId);
     await this.notificationsService.sendAppointmentNotification(appointment);
@@ -257,108 +96,28 @@ export class AppointmentsService {
     userId: number,
     tenantId: string,
   ): Promise<Appointment> {
-    // Verificar se o agendamento existe e pertence ao tenant
     const existingAppointment = await this.findOne(id, tenantId);
-    if (!existingAppointment) {
-      throw new NotFoundException(`Agendamento com ID ${id} não encontrado`);
-    }
 
-    // Se estiver atualizando paciente ou psicólogo, verificar se existem
-    if (data.patient?.connect?.id) {
-      const patient = await this.prisma.patient.findFirst({
-        where: { id: Number(data.patient.connect.id), tenantId },
-        include: {
-          user: {
-            select: {
-              id: true,
-              email: true,
-              name: true,
-              role: true,
-              refreshToken: true,
-              createdAt: true,
-              updatedAt: true,
-              phone: true,
-              tenantId: true,
-            },
-          },
-        },
-      });
-      if (!patient) {
-        throw new NotFoundException(
-          `Paciente com ID ${data.patient.connect.id} não encontrado`,
-        );
-      }
-    }
-
-    if (data.psychologist?.connect?.id) {
-      const psychologist = await this.prisma.psychologist.findFirst({
-        where: { id: Number(data.psychologist.connect.id), tenantId },
-        include: {
-          user: {
-            select: {
-              id: true,
-              email: true,
-              name: true,
-              role: true,
-              refreshToken: true,
-              createdAt: true,
-              updatedAt: true,
-              phone: true,
-              tenantId: true,
-            },
-          },
-        },
-      });
-      if (!psychologist) {
-        throw new NotFoundException(
-          `Psicólogo com ID ${data.psychologist.connect.id} não encontrado`,
-        );
-      }
-    }
-
-    const appointment = await this.prisma.appointment.update({
-      where: {
-        id,
+    // Se estiver alterando data/hora, verificar conflitos
+    if (data.dateTime || data.duration) {
+      const hasConflict = await this.appointmentsRepository.checkConflicts(
+        existingAppointment.psychologistId,
+        (data.dateTime as Date) || existingAppointment.dateTime,
+        (data.duration as number) || existingAppointment.duration,
         tenantId,
-      },
+        id,
+      );
+
+      if (hasConflict) {
+        throw new BadRequestException('Conflito de horário detectado');
+      }
+    }
+
+    const appointment = await this.appointmentsRepository.update(
+      id,
       data,
-      include: {
-        patient: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                email: true,
-                name: true,
-                role: true,
-                refreshToken: true,
-                createdAt: true,
-                updatedAt: true,
-                phone: true,
-                tenantId: true,
-              },
-            },
-          },
-        },
-        psychologist: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                email: true,
-                name: true,
-                role: true,
-                refreshToken: true,
-                createdAt: true,
-                updatedAt: true,
-                phone: true,
-                tenantId: true,
-              },
-            },
-          },
-        },
-      },
-    });
+      tenantId,
+    );
 
     await this.invalidateCache(tenantId);
     await this.notificationsService.sendAppointmentNotification(appointment);
@@ -367,55 +126,7 @@ export class AppointmentsService {
   }
 
   async delete(id: number, tenantId: string): Promise<Appointment> {
-    // Verificar se o agendamento existe e pertence ao tenant
-    const existingAppointment = await this.findOne(id, tenantId);
-    if (!existingAppointment) {
-      throw new NotFoundException(`Agendamento com ID ${id} não encontrado`);
-    }
-
-    const appointment = await this.prisma.appointment.delete({
-      where: {
-        id,
-        tenantId,
-      },
-      include: {
-        patient: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                email: true,
-                name: true,
-                role: true,
-                refreshToken: true,
-                createdAt: true,
-                updatedAt: true,
-                phone: true,
-                tenantId: true,
-              },
-            },
-          },
-        },
-        psychologist: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                email: true,
-                name: true,
-                role: true,
-                refreshToken: true,
-                createdAt: true,
-                updatedAt: true,
-                phone: true,
-                tenantId: true,
-              },
-            },
-          },
-        },
-      },
-    });
-
+    const appointment = await this.appointmentsRepository.delete(id, tenantId);
     await this.invalidateCache(tenantId);
     return appointment;
   }
