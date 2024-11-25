@@ -78,5 +78,12 @@ async function bootstrap() {
   const tenantMiddleware = new TenantMiddleware();
   app.use(tenantMiddleware.use.bind(tenantMiddleware));
   await app.listen(process.env.PORT || 3000);
+
+  //dotenv Config
+  async function bootstrap() {
+    const app = await NestFactory.create(AppModule);
+    await app.listen(3000);
+  }
+  bootstrap();
 }
 bootstrap();
