@@ -10,9 +10,16 @@ import { MetricsController } from './metrics.controller';
 import { MetricsService } from './metrics.service';
 import { ScheduleModule } from '@nestjs/schedule';
 import { MetricsTask } from './tasks/metrics.task';
+import { AppModule } from 'src/app.module';
 
 @Module({
-  imports: [TerminusModule, HttpModule, PrismaModule, ScheduleModule.forRoot()],
+  imports: [
+    TerminusModule,
+    HttpModule,
+    PrismaModule,
+    ScheduleModule.forRoot(),
+    AppModule,
+  ],
   controllers: [HealthController, MetricsController],
   providers: [
     PrismaHealthIndicator,

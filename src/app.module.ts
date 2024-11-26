@@ -18,6 +18,8 @@ import { HealthModule } from './health/health.module';
 import { ConfigModule } from '@nestjs/config';
 import { TenantMiddleware } from './middlewares/tenant.middleware';
 import { MoodDiariesModule } from './mood-diaries/mood-diaries.module';
+import { APP_INTERCEPTOR } from '@nestjs/core';
+import { MetricsInterceptor } from './health/interceptors/metrics.interceptor';
 
 @Module({
   imports: [
@@ -39,7 +41,15 @@ import { MoodDiariesModule } from './mood-diaries/mood-diaries.module';
     MoodDiariesModule,
   ],
   controllers: [AppController],
-  providers: [AppService, TenantResourceGuard, PermissionGuard],
+  providers: [
+    AppService,
+    TenantResourceGuard,
+    PermissionGuard,
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: MetricsInterceptor,
+    },
+  ],
   exports: [TenantResourceGuard, PermissionGuard],
 })
 export class AppModule implements NestModule {

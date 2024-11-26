@@ -7,8 +7,8 @@ import { TimeoutInterceptor } from './common/interceptors/timeout.interceptor';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
-import { MetricsInterceptor } from './health/interceptors/metrics.interceptor';
-import { MetricsService } from './health/metrics.service';
+// import { MetricsInterceptor } from './health/interceptors/metrics.interceptor';
+// import { MetricsService } from './health/metrics.service';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
@@ -41,8 +41,8 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api/docs', app, document);
 
-  const metricsService = app.get(MetricsService);
-  app.useGlobalInterceptors(new MetricsInterceptor(metricsService));
+  // const metricsService = app.get(MetricsService);
+  // app.useGlobalInterceptors(new MetricsInterceptor(metricsService));
 
   // Configuração do ValidationPipe global
   app.useGlobalPipes(
